@@ -1,0 +1,27 @@
+{
+    "name": "ibraelillo/mambo",
+    "description": "Render server side javascript applications",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Ibrael Espinosa",
+            "email": "ibrael.avalanch@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "7.0.*",
+        "monolog/monolog": "^1.20"
+    },
+    "require-dev": {
+        "phpv8/v8js-stubs": "^1.1",
+        "phpunit/phpunit": "^5.4",
+        "symfony/var-dumper": "^3.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Mambo\\": "src/",
+            "Mambo\\Tests\\": "tests/"
+        }
+    }
+}
