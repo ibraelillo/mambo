@@ -10,6 +10,8 @@ namespace Mambo\Tests;
 
 
 use Mambo\JS;
+use Mambo\Loader\NullLoader;
+use Mambo\Loader\SimpleLoader;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 
@@ -30,9 +32,7 @@ class JSTest extends \PHPUnit_Framework_TestCase
     public function testBinaryContext()
     {
 
-        $app  = new JS('PHP', __DIR__, [], [
-            __DIR__.'/app.js'
-        ]);
+        $app  = new JS('PHP', __DIR__, new NullLoader());
 
         $app->setCachedir(
             __DIR__
@@ -50,9 +50,7 @@ class JSTest extends \PHPUnit_Framework_TestCase
      */
     public function testFailedBinaryContext()
     {
-        $app  = new JS('PHP', __DIR__, [], [
-            __DIR__.'/scripts/failed.js'
-        ]);
+        $app  = new JS('PHP', __DIR__, new NullLoader());
 
         $app->setLogger($this->createLogger('PHP'));
 
@@ -62,7 +60,7 @@ class JSTest extends \PHPUnit_Framework_TestCase
 
         try{
 
-            $app->generateBinaryContext();
+            $app->generateBinaryContextFromSource(file_get_contents(__DIR__.'/scripts/failed.js'));
         }
         catch(\Exception $e){
             $this->assertFileNotExists(
@@ -78,11 +76,16 @@ class JSTest extends \PHPUnit_Framework_TestCase
      * */
     public function testCreateEngine()
     {
-        $app  = new JS('PHP', __DIR__, [], [
-            __DIR__.'/app.js'
-        ], __DIR__);
+        $app  = new JS('PHP', __DIR__, new NullLoader());
+        $app->setDependencies([
+            'console' => [
+                'code' => file_get_contents(__DIR__.'/app.js'),
+                'enabled' => true,
+                'dependencies' => []
+            ]
+        ]);
 
-        $result = $app->execute("console.log('test');");
+        $result = $app->execute("console.log('test');", 'test.js');
 
         $this->assertEquals('test', $result);
     }
@@ -92,14 +95,15 @@ class JSTest extends \PHPUnit_Framework_TestCase
      */
     public function testExecute()
     {
-        $app = new JS('App', __DIR__);
+        $app = new JS('App', __DIR__, new SimpleLoader(__DIR__));
         $app->setLogger(
             $this->createLogger($app->getAppName())
         );
         $res = null;
 
         try{
-            $res = $app->execute("console.log('this fail');");
+            $res = $app->execute("print(process.cwd()); print(Object.keys(this.global)); print(Object.keys(require('./test')));");
+            dump($res);
         }
         catch(\V8JsScriptException $e){
             $this->assertContains('ReferenceError: console is not defined', $e->getMessage());
@@ -109,7 +113,7 @@ class JSTest extends \PHPUnit_Framework_TestCase
 
     public function testCommonJsRequire()
     {
-        $app  = new JS('PHP', __DIR__.'/scripts', [], []);
+        $app  = new JS('PHP', __DIR__.'/scripts', new NullLoader(), []);
 
         $logger = new Logger($app->getAppName());
         $handler = new StreamHandler(__DIR__.'/../logs/test.logs');
@@ -149,7 +153,7 @@ class JSTest extends \PHPUnit_Framework_TestCase
             $logger->info($text);
         };
 
-        $app = new JS('Test', __DIR__);
+        $app = new JS('Test', __DIR__, new NullLoader());
         $app->addHelper('customLogger', $helper);
         $app->execute("Test.customLogger('test custom logger')");
 
@@ -163,7 +167,7 @@ class JSTest extends \PHPUnit_Framework_TestCase
 
     public function testReactApp()
     {
-        $app = new JS('PHP', __DIR__.'/scripts/react', []);
+        $app = new JS('PHP', __DIR__.'/scripts/react', new NullLoader());
         $app->setLogger($this->createLogger('PHP'));
 
         $result = $app->execute("require('./server');");

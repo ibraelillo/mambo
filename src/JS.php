@@ -8,6 +8,7 @@
 
 namespace Mambo;
 
+use Mambo\helpers\Process;
 use Mambo\Loader\JSLoaderInterface;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
@@ -76,18 +77,51 @@ class JS implements LoggerAwareInterface
      *
      * @param $appName
      * @param $basePath
-     * @param array $helpers
-     * @param array $dependencies
+     * @param JSLoaderInterface $loader
+     * @param null $cache_dir
      */
-    public function __construct($appName, $basePath, array $helpers = [], array $dependencies = [], $cache_dir = null)
+    public function __construct($appName, $basePath, JSLoaderInterface $loader, $cache_dir = null)
     {
         $this->setAppName($appName);
         $this->setBasePath($basePath);
-        $this->setHelpers($helpers);
-        $this->setDependencies($dependencies);
+        $this->setLoader($loader);
         $this->setCachedir($cache_dir);
 
         $this->logger = new NullLogger();
+
+        $this->dependencies = [
+            'process' => [
+                'code' => file_get_contents(__DIR__.'/extensions/process.js'),
+                'enabled' => true,
+                'dependencies' => []
+            ],
+            'path' => [
+                'code' => file_get_contents(__DIR__.'/extensions/path.js'),
+                'enabled' => true,
+                'dependencies' => []
+            ],
+            'executionContext' => [
+                'code' => sprintf("
+                    var ExecutionContext = '%s';
+                    ", json_encode($this->appName)
+                ),
+                'dependencies' => [],
+                'enabled' => true
+            ],
+            '__basePath' => [
+                'code' => sprintf("
+                    var __basePath = '%s';
+                    ", json_encode($this->basePath)
+                ),
+                'dependencies' => [],
+                'enabled' => true
+            ],
+            'require' => [
+                'code' => file_get_contents(__DIR__.'/extensions/require.js'),
+                'dependencies' => [ '__basePath' ],
+                'enabled' => true
+            ]
+        ];
     }
 
     /**
@@ -97,7 +131,7 @@ class JS implements LoggerAwareInterface
      * @return string
      * @throws \Exception
      */
-    public function execute($jscode)
+    public function execute($jscode, $scriptname = null)
     {
         if(!$this->v8)
             $this->createEngine();
@@ -109,7 +143,7 @@ class JS implements LoggerAwareInterface
                 return null;
             });
 
-            $this->v8->executeString($jscode, \V8Js::FLAG_FORCE_ARRAY);
+            $this->v8->executeString($jscode, $scriptname, \V8Js::FLAG_FORCE_ARRAY);
             ob_end_clean();
 
 
@@ -135,19 +169,36 @@ class JS implements LoggerAwareInterface
 
     }
 
+    /**
+     *
+     */
+    public function iniContext()
+    {
+        /**
+         * add extensions
+         */
+        foreach ($this->dependencies as $name => $dep)
+        {
+            \V8Js::registerExtension($name, $dep['code'], $dep['dependencies'], $dep['enabled']);
+        }
+    }
 
     /**
      * Create the v8 engine
      */
     protected function createEngine()
     {
+        $this->iniContext();
+
         $this->v8 = new \V8Js(
-            $this->appName,
+            'global',
             [],
-            [],
+            array_keys($this->dependencies),
             true,
             $this->cache_dir ? file_get_contents(sprintf('%s/%s.bin', $this->cache_dir, $this->appName)): ''
         );
+
+        $this->v8->process = new Process($this);
 
         $bp = $this->basePath;
         $logger = $this->logger;
@@ -225,7 +276,7 @@ class JS implements LoggerAwareInterface
         $inicode = '';
         foreach($this->getDependencies() as $dep)
         {
-            $inicode .= file_get_contents($dep)."\n";
+            $inicode .= $dep['code'];
         }
 
         $this->generateBinaryContextFromSource($inicode);
@@ -234,11 +285,15 @@ class JS implements LoggerAwareInterface
 
     /**
      * @param $source
+     * @throws \Exception
      */
     public function generateBinaryContextFromSource($source)
     {
 
         try{
+
+            //$this->iniContext();
+
             $binaryContent = \V8Js::createSnapshot($source);
 
             file_put_contents(sprintf('%s/%s.bin', $this->getCachedir(), $this->getAppName()), $binaryContent);
@@ -282,10 +337,6 @@ class JS implements LoggerAwareInterface
      */
     public function setBasePath($basePath)
     {
-        $end = substr($basePath, strlen($basePath)-1, 1);
-        if(!in_array($end, ['/', '\\']))
-            $basePath .= DIRECTORY_SEPARATOR;
-
         $this->basePath = $basePath;
 
         return $this;
@@ -332,10 +383,13 @@ class JS implements LoggerAwareInterface
 
     /**
      * @param LoggerInterface $logger
+     * @return $this
      */
     public function setLogger(LoggerInterface $logger)
     {
         $this->logger = $logger;
+
+        return $this;
     }
 
     /**
@@ -352,7 +406,7 @@ class JS implements LoggerAwareInterface
      */
     public function setDependencies($dependencies)
     {
-        $this->dependencies = $dependencies;
+        $this->dependencies += $dependencies;
 
         return $this;
     }
@@ -374,6 +428,14 @@ class JS implements LoggerAwareInterface
         $this->loader = $loader;
 
         return $this;
+    }
+
+    /**
+     * @return NullLogger
+     */
+    public function getLogger()
+    {
+        return $this->logger;
     }
 
 
